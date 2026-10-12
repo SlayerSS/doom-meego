@@ -1,0 +1,30 @@
+# build output
+bin/
+build/
+build-*/
+*.o
+Makefile.qmake
+moc_*
+doom-meego
+doom-meego-hu
+doom-meego-i686
+make.log
+# game data / runtime files (never commit WADs)
+*.wad
+*.WAD
+default.cfg
+*.dsg
+doom_log*.txt
+keys.txt
+# backups / editor junk
+*.bak*
+*~
+*.swp
+.DS_Store
+Thumbs.db
+
+# leftover nested copy
+doom-meego-genesis/
+# release zips
+release/
+*.zip
