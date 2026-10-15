@@ -52,7 +52,7 @@
    - `AppUpgrade`
    - `.lge.upgrade.xml`  
    Имя `AppUpgrade` **не менять**. На Windows файл `.lge.upgrade.xml` может быть скрытым — включите показ скрытых файлов.
-4. Скачайте `freedoom1.wad` и положите в **тот же корень**, рядом с `AppUpgrade`.
+4. Скачайте `freedoom1.wad` и положите в **тот же корень**, рядом с `AppUpgrade`. Можно и в папку `doom-meego\` — она уже есть в zip (пустая, с подсказкой `положите_сюда_WAD.txt`). Несколько WAD → меню выбора игры.
 5. Вставьте карту → подтвердите найденное обновление (**OK**) → запускается Doom.
 
 **Дерево на карте (плоско, без папок)**
@@ -60,6 +60,7 @@
 \
 ├── .lge.upgrade.xml
 ├── AppUpgrade          ← Doom (из Releases)
+├── doom-meego\         ← папка для WAD (из zip)
 └── freedoom1.wad       ← скачать отдельно
 ```
 
@@ -171,7 +172,7 @@ The head unit shows an update **only** if `version` matches the unit type.
 1. FAT32 SD card.  
 2. Unzip the matching release.  
 3. Copy **its contents** to the **card root**: `AppUpgrade`, `.lge.upgrade.xml` (do not rename `AppUpgrade`; on Windows enable hidden files for `.lge.upgrade.xml`).  
-4. Put `freedoom1.wad` in the **same root**.  
+4. Put `freedoom1.wad` in the **same root**. Or into the `doom-meego\` folder already included in the zip (empty, with a hint file). Several WADs → game selection menu.  
 5. Insert the card → confirm update (**OK**) → Doom starts.
 
 ```
