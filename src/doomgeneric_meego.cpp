@@ -1,5 +1,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 SlayerSS
 // Part of doom-meego (doomgeneric port for Hyundai Genesis DH / LG DHAVN MeeGo head units).
@@ -35,6 +36,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <dirent.h>
+#include <strings.h>
 
 extern "C" {
 #include "doomkeys.h"
@@ -128,6 +131,53 @@ static const char *kZoneName[Z_COUNT] = {   // UTF-8, shown under the icon in th
 
 #define GAME_W 960   // 320 x3
 #define GAME_H 720   // 200 x3.6 (rows repeated 4,4,3,4,3 -> exactly 18 rows per 5 source rows)
+
+// ---------------- IWAD selection menu (before D_DoomMain, only if >1 IWAD next to the chosen one) ----------------
+#define WM_MAX 8
+struct WadMenu { int active; int count; int sel; int chosen; char path[WM_MAX][600]; const char *title[WM_MAX]; const char *file[WM_MAX]; };
+static WadMenu s_wm;
+static QRect wadItemRect(int w, int h, int i, int count)
+{
+    int top = 150, bottom = h - 90;
+    int rowH = (bottom - top) / (count > 0 ? count : 1);
+    if (rowH > 92) rowH = 92;
+    int listH = rowH * count;
+    int y0 = top + ((bottom - top) - listH) / 2;
+    int iw = w * 3 / 4; if (iw > 960) iw = 960;
+    return QRect((w - iw) / 2, y0 + i * rowH + 4, iw, rowH - 8);
+}
+static int wadMenuHit(int w, int h, const QPoint &p)
+{
+    for (int i = 0; i < s_wm.count; ++i)
+        if (wadItemRect(w, h, i, s_wm.count).contains(p)) return i;
+    return -1;
+}
+static void paintWadMenu(QPainter &p, int w, int h)
+{
+    p.fillRect(QRect(0, 0, w, h), Qt::black);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QFont f = p.font();
+    f.setBold(true); f.setPixelSize(44); p.setFont(f);
+    p.setPen(QColor(230, 40, 40));
+    p.drawText(QRect(0, 30, w, 80), Qt::AlignCenter, QString::fromUtf8("DOOM \xe2\x80\x94 \xd0\xb2\xd1\x8b\xd0\xb1\xd0\xb5\xd1\x80\xd0\xb8\xd1\x82\xd0\xb5 \xd0\xb8\xd0\xb3\xd1\x80\xd1\x83"));
+    for (int i = 0; i < s_wm.count; ++i) {
+        QRect r = wadItemRect(w, h, i, s_wm.count);
+        bool sel = i == s_wm.sel;
+        p.setPen(QPen(sel ? QColor(255, 90, 90) : QColor(70, 70, 70), sel ? 4 : 2));
+        p.setBrush(sel ? QColor(120, 15, 15) : QColor(25, 25, 25));
+        p.drawRoundedRect(r, 12, 12);
+        QFont nf = f; nf.setBold(sel); nf.setPixelSize(r.height() >= 70 ? 36 : 28); p.setFont(nf);
+        p.setPen(sel ? Qt::white : QColor(200, 200, 200));
+        p.drawText(r.adjusted(30, 0, -220, 0), Qt::AlignVCenter | Qt::AlignLeft | Qt::TextSingleLine, QString::fromUtf8(s_wm.title[i]));
+        QFont ff = f; ff.setBold(false); ff.setPixelSize(22); p.setFont(ff);
+        p.setPen(sel ? QColor(255, 200, 200) : QColor(120, 120, 120));
+        p.drawText(r.adjusted(0, 0, -30, 0), Qt::AlignVCenter | Qt::AlignRight | Qt::TextSingleLine, QString::fromUtf8(s_wm.file[i]));
+    }
+    QFont hf = f; hf.setBold(false); hf.setPixelSize(24); p.setFont(hf);
+    p.setPen(QColor(150, 150, 150));
+    p.drawText(QRect(0, h - 80, w, 60), Qt::AlignCenter,
+               QString::fromUtf8("\xd0\x9a\xd1\x80\xd1\x83\xd1\x82\xd0\xb8\xd0\xbb\xd0\xba\xd0\xb0 / \xd1\x81\xd1\x82\xd1\x80\xd0\xb5\xd0\xbb\xd0\xba\xd0\xb8 \xe2\x80\x94 \xd0\xb2\xd1\x8b\xd0\xb1\xd0\xbe\xd1\x80     \xd0\x9d\xd0\xb0\xd0\xb6\xd0\xb0\xd1\x82\xd0\xb8\xd0\xb5 / NAV \xe2\x80\x94 \xd0\xb8\xd0\xb3\xd1\x80\xd0\xb0\xd1\x82\xd1\x8c     BACK \xe2\x80\x94 \xd0\xb2\xd1\x8b\xd1\x85\xd0\xbe\xd0\xb4"));
+}
 
 class DoomWidget : public QWidget
 {
@@ -273,6 +323,7 @@ protected:
     void paintEvent(QPaintEvent *)
     {
         QPainter p(this);
+        if (s_wm.active) { paintWadMenu(p, width(), height()); return; }
         QRect t = target();
         if (bars.size() != size()) buildBars();
         // blit only the bars; the game image covers the middle
@@ -514,15 +565,20 @@ static int s_mouseLog = 0;
 void DoomWidget::mousePressEvent(QMouseEvent *e)
 {
     if (s_mouseLog++ < 20) fprintf(stderr, "doom-meego: qt mouse %d,%d evdev=%d\n", e->pos().x(), e->pos().y(), s_evTouch);
+    if (s_wm.active) { int i = wadMenuHit(width(), height(), e->pos()); if (i >= 0) { s_wm.sel = i; s_wm.chosen = 1; } return; }
     if (!s_evTouch) setZone(zoneAt(e->pos()));
 }
-void DoomWidget::mouseMoveEvent(QMouseEvent *e) { if (!s_evTouch && e->buttons()) setZone(zoneAt(e->pos())); }
-void DoomWidget::mouseReleaseEvent(QMouseEvent *) { if (!s_evTouch) setZone(Z_NONE); }
+void DoomWidget::mouseMoveEvent(QMouseEvent *e) { if (!s_wm.active && !s_evTouch && e->buttons()) setZone(zoneAt(e->pos())); }
+void DoomWidget::mouseReleaseEvent(QMouseEvent *) { if (!s_wm.active && !s_evTouch) setZone(Z_NONE); }
 
 extern "C" void meego_touch(int x, int y, int down)
 {
     if (!s_Widget) return;
     s_evTouch = 1;
+    if (s_wm.active) {
+        if (down) { int i = wadMenuHit(s_Widget->width(), s_Widget->height(), QPoint(x, y)); if (i >= 0) { s_wm.sel = i; s_wm.chosen = 1; } }
+        return;
+    }
     if (!down) { s_Widget->setZone(Z_NONE); return; }
     int z = s_Widget->zoneAt(QPoint(x, y));
     if (z != s_Widget->zone) s_Widget->setZone(z);
@@ -573,6 +629,115 @@ extern "C" void meego_show_fatal(const char *msg_utf8)
     exit(1);
 }
 
+extern "C" { extern int myargc; extern char **myargv; extern int menuactive; }
+
+struct WadKnown { const char *file; const char *title; };
+static const WadKnown kWads[] = {
+    { "freedoom1.wad", "Freedoom: \xd0\xa4\xd0\xb0\xd0\xb7\xd0\xb0 1" },
+    { "freedoom2.wad", "Freedoom: \xd0\xa4\xd0\xb0\xd0\xb7\xd0\xb0 2" },
+    { "doom.wad",      "Doom" },
+    { "doom1.wad",     "Doom (\xd0\xb4\xd0\xb5\xd0\xbc\xd0\xbe)" },
+    { "doom2.wad",     "Doom II" },
+    { "plutonia.wad",  "Final Doom: Plutonia" },
+    { "tnt.wad",       "Final Doom: TNT" },
+    { "chex.wad",      "Chex Quest" },
+    { 0, 0 }
+};
+
+static int isIwadFile(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    char hdr[4] = { 0, 0, 0, 0 };
+    size_t n = fread(hdr, 1, 4, f);
+    fclose(f);
+    return n == 4 && memcmp(hdr, "IWAD", 4) == 0;
+}
+
+/* Collect supported IWADs in dir (table order). */
+static void wadMenuScan(const char *dir)
+{
+    s_wm.count = 0;
+    for (int k = 0; kWads[k].file && s_wm.count < WM_MAX; ++k) {
+        DIR *d = opendir(dir);
+        if (!d) return;
+        struct dirent *e;
+        while ((e = readdir(d)) != 0) {
+            if (strcasecmp(e->d_name, kWads[k].file) != 0) continue;
+            char path[600];
+            snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+            if (!isIwadFile(path)) { fprintf(stderr, "doom-meego: [wadmenu] skip %s (no IWAD header)\n", path); continue; }
+            int i = s_wm.count++;
+            snprintf(s_wm.path[i], sizeof(s_wm.path[i]), "%s", path);
+            s_wm.title[i] = kWads[k].title;
+            s_wm.file[i] = kWads[k].file;
+            break;
+        }
+        closedir(d);
+    }
+}
+
+static void wadMenuRun(void)
+{
+    int idx = -1;
+    for (int i = 1; i + 1 < myargc; ++i) {
+        if (strcmp(myargv[i], "-nowadmenu") == 0 || strcmp(myargv[i], "-file") == 0) return;
+        if (strcmp(myargv[i], "-iwad") == 0) idx = i + 1;
+    }
+    if (idx < 0 || getenv("DOOM_NOWADMENU")) return;
+    char dir[600];
+    snprintf(dir, sizeof(dir), "%s", myargv[idx]);
+    char *slash = strrchr(dir, '/');
+    if (slash) *slash = 0; else snprintf(dir, sizeof(dir), ".");
+    wadMenuScan(dir);
+    fprintf(stderr, "doom-meego: [wadmenu] %d IWAD(s) in %s\n", s_wm.count, dir);
+    if (s_wm.count < 2) return;
+
+    char lastFile[600];
+    snprintf(lastFile, sizeof(lastFile), "%s/doom_last_wad.txt", dir);
+    char last[128] = "";
+    FILE *lf = fopen(lastFile, "r");
+    if (lf) { if (fgets(last, sizeof(last), lf)) { char *nl = strpbrk(last, "\r\n"); if (nl) *nl = 0; } fclose(lf); }
+    const char *cur = strrchr(myargv[idx], '/'); cur = cur ? cur + 1 : myargv[idx];
+    s_wm.sel = 0;
+    for (int i = 0; i < s_wm.count; ++i) if (strcasecmp(s_wm.file[i], cur) == 0) s_wm.sel = i;
+    for (int i = 0; i < s_wm.count; ++i) if (last[0] && strcasecmp(s_wm.file[i], last) == 0) s_wm.sel = i;
+
+    s_wm.active = 1; s_wm.chosen = 0;
+    menuactive = 1;              /* knob/jog -> Up/Down taps, jog press / NAV -> Enter, HOME ignored */
+    s_Widget->repaint();
+    int shown = -1;
+    while (!s_wm.chosen) {
+        meego_input_poll();
+        x11Poll();
+        QApplication::processEvents();
+        int pressed; unsigned char k;
+        while (!s_wm.chosen && DG_GetKey(&pressed, &k)) {
+            if (!pressed) continue;
+            if (k == KEY_UPARROW || k == KEY_LEFTARROW)       s_wm.sel = (s_wm.sel + s_wm.count - 1) % s_wm.count;
+            else if (k == KEY_DOWNARROW || k == KEY_RIGHTARROW) s_wm.sel = (s_wm.sel + 1) % s_wm.count;
+            else if (k == KEY_ENTER || k == KEY_FIRE || k == KEY_USE) s_wm.chosen = 1;
+            else if (k == KEY_ESCAPE) { fprintf(stderr, "doom-meego: [wadmenu] BACK -> exit\n"); meego_quit(); }
+        }
+        if (shown != s_wm.sel) { shown = s_wm.sel; s_Widget->repaint(); }
+        usleep(15000);
+    }
+    fprintf(stderr, "doom-meego: [wadmenu] chosen %s\n", s_wm.path[s_wm.sel]);
+    lf = fopen(lastFile, "w");
+    if (lf) { fprintf(lf, "%s\n", s_wm.file[s_wm.sel]); fclose(lf); }
+    else fprintf(stderr, "doom-meego: [wadmenu] cannot save %s (read-only?)\n", lastFile);
+    char *np = (char *)malloc(strlen(s_wm.path[s_wm.sel]) + 1);
+    strcpy(np, s_wm.path[s_wm.sel]);
+    myargv[idx] = np;
+    s_wm.active = 0;
+    menuactive = 0;
+    meego_resetKeys("wad menu done");
+    { int pr; unsigned char kk; while (DG_GetKey(&pr, &kk)) {} }
+    memset(s_keyDown, 0, sizeof(s_keyDown));
+    s_Widget->repaint();
+    QApplication::processEvents();
+}
+
 extern "C" void DG_Init()
 {
     memset(s_KeyQueue, 0, sizeof(s_KeyQueue));
@@ -604,6 +769,7 @@ extern "C" void DG_Init()
     QApplication::processEvents();
     s_Widget->shownAt = DG_GetTicksMs();
     meego_input_init();
+    wadMenuRun();
 }
 
 extern "C" const unsigned char *I_GetVideoBuffer320(void);
@@ -676,6 +842,28 @@ int main(int argc, char **argv)
     setvbuf(stderr, 0, _IONBF, 0);
     setvbuf(stdout, 0, _IOLBF, 0);
     {
+        /* Logging is OFF by default (14.10). Enable: env DOOM_LOG=1 or a file doom_log_on.txt
+           next to the WAD / exe (card: doom-meego/doom_log_on.txt). Off -> stdout+stderr to /dev/null. */
+        int on = getenv("DOOM_LOG") && atoi(getenv("DOOM_LOG")) > 0;
+        char p[700];
+        const char *dirs[4] = { meego_exe_dir(), "/navi/doom-meego", "./doom-meego", "." };
+        for (int i = 0; !on && i < 4; ++i) {
+            snprintf(p, sizeof(p), "%s/doom_log_on.txt", dirs[i]);
+            on = access(p, F_OK) == 0;
+        }
+        for (int i = 1; !on && i + 1 < argc; ++i)
+            if (strcmp(argv[i], "-iwad") == 0) {
+                snprintf(p, sizeof(p), "%s", argv[i + 1]);
+                char *sl = strrchr(p, '/');
+                if (sl) { snprintf(sl + 1, sizeof(p) - (sl + 1 - p), "doom_log_on.txt"); on = access(p, F_OK) == 0; }
+            }
+        if (!on) {
+            int nul = open("/dev/null", O_WRONLY);
+            if (nul >= 0) { dup2(nul, 1); dup2(nul, 2); if (nul > 2) close(nul); }
+            goto log_done;
+        }
+    }
+    {
         /* Under Updater stdout is a pipe (MergedChannels -> doom_log.txt on card).
            Send stderr there too; exe dir is /tmp/doom-meego-run-<pid>, a file log there is lost. */
         struct stat st;
@@ -688,6 +876,7 @@ int main(int argc, char **argv)
         }
     }
 
+log_done:
     /* Flat card launch: head unit runs AppUpgrade with no -iwad. Find WAD next to the exe. */
     int has_iwad = 0;
     for (int i = 1; i < argc; ++i)

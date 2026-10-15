@@ -12,7 +12,7 @@ Original copyright headers in every file are kept unchanged.
 | doomgeneric | `doomgeneric/doomgeneric.[ch]` (upstream platform ports SDL/X11/Win/etc. are not included in this tree) | ozkl (https://github.com/ozkl/doomgeneric) | GPL-2.0 |
 | mus2mid | `doomgeneric/mus2mid.c` | Ben Ryves 2006, Simon Howard | GPL-2.0 |
 | sha1 | `doomgeneric/sha1.c` | Werner Koch / Simon Howard (GnuPG-derived) | GPL-2.0-or-later |
-| doom-meego platform layer | `src/doomgeneric_meego.cpp`, `src/meego_input.*` | Copyright (C) 2026 SlayerSS | GPL-2.0 |
+| doom-meego platform layer (video, touch, input grab/release, focus handling, IWAD menu) | `src/doomgeneric_meego.cpp`, `src/meego_input.*` | Copyright (C) 2026 SlayerSS | GPL-2.0 |
 | ALSA SFX mixer | `src/i_alsa.c` | Copyright (C) 2026 SlayerSS | GPL-2.0 |
 | OPL music driver | `src/i_oplmus.c` (MUS/MIDI player, GENMIDI instruments from the WAD) | Copyright (C) 2026 SlayerSS | GPL-2.0 |
 | Nuked OPL3 emulator | `src/opl3.c`, `src/opl3.h` (v1.8, unmodified; license text `src/opl3-LICENSE.txt`) | Copyright (C) 2013-2020 Nuke.YKT (https://github.com/nukeykt/Nuked-OPL3) | LGPL-2.1-or-later (GPL-compatible) |

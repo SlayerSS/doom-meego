@@ -15,6 +15,7 @@
 #include "doomkeys.h"
 extern "C" void I_AlsaPause(int p);
 extern "C" void I_AlsaFocusPause(int lost, const char *why);
+extern "C" void I_AlsaPauseReason(int bit, int on, const char *why);
 extern "C" void I_AlsaShutdown(void);
 static int s_xLost = 0;   // X says our window is unmapped/obscured/unfocused -> audio off
 /* Auto-return to foreground: "hard" loss = our window unmapped / fully obscured by
@@ -228,7 +229,7 @@ extern "C" void meego_diag(const char *why)
             FILE *f = fopen(sys, "r");
             if (f) { if (fgets(nm, sizeof(nm), f)) { char *nl = strchr(nm, '\n'); if (nl) *nl = 0; } fclose(f); }
             const char *g = "not opened";
-            int fd = open(path, O_RDONLY | O_NONBLOCK);
+            int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
             if (fd >= 0) { int got; g = probeGrab(fd, 0, &got); close(fd); }
             fprintf(stderr, "doom-meego: [diag]  %s '%s' not ours (skipped) grab=[%s] holders: %s\n", path, nm, g, holders);
         }
@@ -380,8 +381,11 @@ static void sigReleaseGrabs(int sig)
 {
     for (int i = 0; i < s_ndev; ++i)
         if (s_grabbed[i] && s_fd[i] >= 0) { ioctl(s_fd[i], LX_EVIOCGRAB, 0); s_grabbed[i] = 0; }
-    _exit(128 + sig);
+    if (sig == SIGTERM || sig == SIGINT || sig == SIGHUP) _exit(128 + sig);
+    signal(sig, SIG_DFL);   /* crash: keys already released, keep the core/exit code */
+    raise(sig);
 }
+static int s_focusRel = 0;   /* keys released because the window lost focus / got covered */
 
 static void atexitReleaseGrabs(void) { releaseGrabs(); }
 
@@ -408,7 +412,7 @@ static void setHidden(int hide, const char *why)
 {
     fprintf(stderr, "doom-meego: [focus] %s from %s (hidden %d -> %d) t=%u\n", hide ? "HIDE" : "SHOW", why, s_hidden, hide, rel());
     if (hide) s_intr = 1; else s_intr = 0;
-    if (hide == s_hidden) { if (!hide) { meego_setVisible(1); fprintf(stderr, "doom-meego: [ui] want front (S 1 while visible)\n"); meego_resetKeys("show again"); reopenDevices("show again"); meego_diag("show (already visible)"); } return; }
+    if (hide == s_hidden) { if (!hide) { s_focusRel = 0; meego_setVisible(1); fprintf(stderr, "doom-meego: [ui] want front (S 1 while visible)\n"); meego_resetKeys("show again"); reopenDevices("show again"); meego_diag("show (already visible)"); } return; }
     if (hide) {
         meego_resetKeys("hide");
         s_hidden = 1;
@@ -420,7 +424,7 @@ static void setHidden(int hide, const char *why)
         meego_diag("after hide");
     } else {
         meego_resetKeys("show");
-        s_hidden = 0;
+        s_hidden = 0; s_focusRel = 0;   // "S 1" = Updater says we are front
         if (s_pausedByUs && paused) sendpause = 1;
         s_pausedByUs = 0;
         meego_setVisible(1);
@@ -546,15 +550,37 @@ static void evdevKey(int code, int value)
     case 79: key(KEY_DOWNARROW, p); key(KEY_LEFTARROW, p); break;  // KP1
     case 81: key(KEY_DOWNARROW, p); key(KEY_RIGHTARROW, p); break; // KP3
     case 76: case 82:                                     // KP5/KP0 jog press
+        if (code == 76 && s_evDown[61]) { hkLog(code, value, "76 during pick-up hold -> ignored"); break; }
         jogPress(p); break;
     // ---- LGE IVI MICOM Hard Keys (/dev/input/event1), codes confirmed by doom_log 12.10 17:03 ----
     case 36:                                              // BACK = Esc (menu/back), long = exit
         key(KEY_ESCAPE, p);
         s_backDownAt = p ? (DG_GetTicksMs() | 1) : 0;
         hkLog(code, value, "BACK -> Esc (long: exit)"); break;
-    case 37:                                              // HOME = pause
-        if (p && !menuactive) { key(KEY_PAUSE, 1); key(KEY_PAUSE, 0); }
-        hkLog(code, value, menuactive ? "HOME -> pause (ignored in menu)" : "HOME -> pause"); break;
+    case 37:                                              // HOME = pause toggle; resume also raises Doom
+        if (p && !menuactive) {
+            int resume = paused ? 1 : 0;
+            key(KEY_PAUSE, 1); key(KEY_PAUSE, 0);
+            if (resume) { meego_setVisible(1); fprintf(stderr, "doom-meego: [ui] want front (HOME resume)\n"); }
+        }
+        hkLog(code, value, menuactive ? "HOME -> pause (ignored in menu)" : "HOME -> pause/resume+raise"); break;
+    // ---- steering wheel (SWRC) on MICOM Hard Keys, codes confirmed by user 13.10 ----
+    // 14.10: real layout from doom_log + user: 64/65 = right stick up/down, 62/63 = call green/red
+    // (event1 is EVIOCGRAB-ed by Doom, so these never reach AppBtPhone while Doom has focus)
+    // 14.10 16:06 doom_log: pick-up (call/send) = 61 (long hold also emits 76 ~1 s later), hang-up (end) = 62.
+    case 61: key(KEY_FIRE, p); hkLog(code, value, "SWRC pick-up -> fire (hold = auto)"); break;
+    case 62: key(KEY_USE, p); hkLog(code, value, "SWRC hang-up -> use"); break;
+    case 63: key(KEY_USE, p); hkLog(code, value, "SWRC call red -> use"); break;
+    case 64: weaponKey(+1, p); hkLog(code, value, "SWRC stick up -> next weapon"); break;
+    case 65: weaponKey(-1, p); hkLog(code, value, "SWRC stick down -> prev weapon"); break;
+    case 60: key(KEY_TAB, p); hkLog(code, value, "SWRC MODE -> automap"); break;
+    case 59:                                              // voice = pause/resume like HOME
+        if (p && !menuactive) {
+            int resume = paused ? 1 : 0;
+            key(KEY_PAUSE, 1); key(KEY_PAUSE, 0);
+            if (resume) { meego_setVisible(1); fprintf(stderr, "doom-meego: [ui] want front (voice resume)\n"); }
+        }
+        hkLog(code, value, "SWRC voice -> pause/resume+raise"); break;
     case 33:                                              // MAP/VOICE = automap
         key(KEY_TAB, p); hkLog(code, value, "MAP -> automap (Tab)"); break;
     case 69:                                              // long MAP/VOICE: ignored (no double Tab)
@@ -605,7 +631,7 @@ static void openDevices(void)
     for (int n = 0; n < 32 && s_ndev < MAXDEV; ++n) {
         char path[64], sys[96], name[128];
         snprintf(path, sizeof(path), "/dev/input/event%d", n);
-        int fd = open(path, O_RDONLY | O_NONBLOCK);
+        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) continue;
         name[0] = 0;
         if (ioctl(fd, LX_EVIOCGNAME(sizeof(name)), name) < 0) {
@@ -647,7 +673,7 @@ static void openDevices(void)
 static void tryGrabs(int force)
 {
     uint32_t now = DG_GetTicksMs();
-    if (s_hidden || (!force && now < s_nextGrabTry)) return;
+    if (s_hidden || s_focusRel || (!force && now < s_nextGrabTry)) return;
     s_nextGrabTry = now + 1000;
     int newly = 0;
     for (int i = 0; i < s_ndev; ++i) {
@@ -882,8 +908,13 @@ extern "C" void meego_quit(void)
 extern "C" void meego_focusEvent(const char *what, int lost)
 {
     fprintf(stderr, "doom-meego: [focus] %s t=%u hidden=%d\n", what, rel(), s_hidden);
-    if (lost) meego_resetKeys(what);
-    else s_nextGrabTry = 0;     // focus back: retry grabs right away
+    if (lost) {
+        meego_resetKeys(what);
+        if (!s_focusRel) { s_focusRel = 1; fprintf(stderr, "doom-meego: [grab] focus lost (%s) -> release keys\n", what); releaseGrabs(); }
+    } else {
+        s_nextGrabTry = 0;     // focus back: retry grabs right away
+        if (s_focusRel) { s_focusRel = 0; fprintf(stderr, "doom-meego: [grab] focus back (%s) -> grab\n", what); tryGrabs(1); }
+    }
     if (lost != s_xLost) { s_xLost = lost; I_AlsaFocusPause(lost, what); }
     if (!s_hidden) {
         if (strstr(what, "obscured") || strstr(what, "UnmapNotify")) {
@@ -907,6 +938,13 @@ extern "C" void meego_input_init(void)
     signal(SIGTERM, sigReleaseGrabs);
     signal(SIGINT, sigReleaseGrabs);
     signal(SIGHUP, sigReleaseGrabs);
+    signal(SIGQUIT, sigReleaseGrabs);
+    signal(SIGSEGV, sigReleaseGrabs);
+    signal(SIGABRT, sigReleaseGrabs);
+    signal(SIGBUS, sigReleaseGrabs);
+    signal(SIGFPE, sigReleaseGrabs);
+    signal(SIGILL, sigReleaseGrabs);
+    signal(SIGPIPE, SIG_IGN);
     int fl = fcntl(0, F_GETFL);
     if (fl >= 0 && !isatty(0) && fcntl(0, F_SETFL, fl | O_NONBLOCK) == 0)
         s_stdinOk = 1;
@@ -959,18 +997,23 @@ extern "C" void meego_input_poll(void)
     uint32_t now = DG_GetTicksMs();
     releaseHolds(0);
     jogPressPoll();
-    if (s_backDownAt && now - s_backDownAt >= 1500) {
-        fprintf(stderr, "doom-meego: long BACK (evdev)\n");
+    if (s_backDownAt && now - s_backDownAt >= 3000) {
+        fprintf(stderr, "doom-meego: long BACK 3s (evdev) -> exit to Updater (game is saved only via Doom menu)\n");
         meego_quit();
     }
     if (s_needReopen && now - s_reopenAt > 1000) { s_reopenAt = now; reopenDevices("stale fd (ENODEV/EOF)"); }
     tryGrabs(0);
     if (!s_hidden) pollDevices();   // no evdev polling while hidden/minimized (grab is released too)
     focusWatch(now);
+    {   /* music/sfx follow the game pause: HOME/pause or Doom menu over a paused game -> silent */
+        static int s_gp = -1;
+        int gp = (paused && !s_hidden) ? 1 : 0;
+        if (gp != s_gp) { s_gp = gp; I_AlsaPauseReason(4, gp, gp ? "game paused" : "game running"); }
+    }
     if (!s_stdinOk) return;
     for (;;) {
         ssize_t r = read(0, s_buf + s_len, sizeof(s_buf) - 1 - s_len);
-        if (r == 0) { s_stdinOk = 0; fprintf(stderr, "doom-meego: [stdin] closed (stdin closed)\n"); return; }
+        if (r == 0) { s_stdinOk = 0; fprintf(stderr, "doom-meego: [stdin] closed (Updater gone) -> release keys\n"); releaseGrabs(); s_focusRel = 1; return; }
         if (r < 0) return;
         s_len += (int)r;
         s_buf[s_len] = 0;
