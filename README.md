@@ -5,6 +5,9 @@
 
 > ⚠️ Неофициальный проект, не связан с Hyundai, Genesis, LG или id Software. Всё на свой риск.  
 > В репозитории **нет** прошивки, ключей Hyundai/LG и WAD-файлов.
+>
+> ⚠️ Unofficial project, not affiliated with Hyundai, Genesis, LG or id Software. Use at your own risk.  
+> The repository contains **no** firmware, Hyundai/LG keys or WAD files.
 
 ## Скриншоты / Screenshots
 
@@ -50,18 +53,20 @@
 2. Распакуйте нужный zip.
 3. Скопируйте **содержимое** zip в **корень** карты (не во вложенную папку):
    - `AppUpgrade`
-   - `.lge.upgrade.xml`  
+   - `.lge.upgrade.xml`
+   - папку `doom-meego\` (для WAD-файлов)  
    Имя `AppUpgrade` **не менять**. На Windows файл `.lge.upgrade.xml` может быть скрытым — включите показ скрытых файлов.
-4. Скачайте `freedoom1.wad` и положите в **тот же корень**, рядом с `AppUpgrade`. Можно и в папку `doom-meego\` — она уже есть в zip (пустая, с подсказкой `положите_сюда_WAD.txt`). Несколько WAD → меню выбора игры.
+4. Скачайте `freedoom1.wad` и положите в папку **`doom-meego\`** на карте. Туда же можно положить другие IWAD — если их несколько, при запуске появится меню выбора игры. (Рядом с `AppUpgrade` в корне тоже работает.)
 5. Вставьте карту → подтвердите найденное обновление (**OK**) → запускается Doom.
 
-**Дерево на карте (плоско, без папок)**
+**Дерево на карте**
 ```
 \
 ├── .lge.upgrade.xml
 ├── AppUpgrade          ← Doom (из Releases)
-├── doom-meego\         ← папка для WAD (из zip)
-└── freedoom1.wad       ← скачать отдельно
+└── doom-meego\         ← папка для WAD (из zip)
+    ├── положите_сюда_WAD.txt
+    └── freedoom1.wad   ← скачать отдельно
 ```
 
 ### Если не работает
@@ -69,7 +74,7 @@
 | Симптом | Что проверить |
 |---------|----------------|
 | Обновление не находится | DH vs DHPE; FAT32; файлы в корне; скопирован скрытый `.lge.upgrade.xml` |
-| «Не найден WAD-файл…» | `freedoom1.wad` в корне карты рядом с `AppUpgrade` |
+| «Не найден WAD-файл…» | `freedoom1.wad` в папке `doom-meego\` на карте (или в корне рядом с `AppUpgrade`) |
 | Нет / тихий звук | Активный медиа-источник (Jukebox); с радио часто тихо — ограничение ШГУ |
 
 ### Управление
@@ -99,7 +104,7 @@
 
 Рядом с `AppUpgrade` на карте: `doom_log_on.txt` (пустой файл включает журнал `doom_log.txt`, по умолчанию журнал выключен); опционально `keys.txt` (переназначение кнопок). `keys.txt` ищется рядом с `AppUpgrade`, затем `/navi/keys.txt`.
 
-WAD ищется: рядом с `AppUpgrade` → в текущем каталоге → в подпапке `doom-meego/` → `/media/*/doom-meego`, `/mnt/*/doom-meego` → корни смонтированных носителей. Имена по порядку: `freedoom1.wad`, `doom.wad`, `doom1.wad`, `freedoom2.wad`, `doom2.wad`, затем любой `*.wad`.
+WAD ищется (рекомендуемое место — папка `doom-meego\`): рядом с `AppUpgrade` → в текущем каталоге → в подпапке `doom-meego/` → `/media/*/doom-meego`, `/mnt/*/doom-meego` → корни смонтированных носителей. Имена по порядку: `freedoom1.wad`, `doom.wad`, `doom1.wad`, `freedoom2.wad`, `doom2.wad`, затем любой `*.wad`.
 
 ### Технические детали
 
@@ -124,7 +129,7 @@ sudo ./scripts/build-i686.sh               # DOOM_OK → builds/DH_2015 и build
 
 ```sh
 cp /media/<карта>/AppUpgrade /tmp/doom && chmod +x /tmp/doom
-cd /media/<карта>
+cd /media/<карта>/doom-meego
 /tmp/doom -iwad freedoom1.wad 2>> doom_log.txt
 ```
 
@@ -139,66 +144,69 @@ cd /media/<карта>
 
 ### Features (v1.1)
 
-- ALSA sound, 48 kHz stereo S16: first device that opens of `main_mix2` → `media_mixer` → `default` (a non-48 kHz device is only logged; pitch would then differ)
-- Music via the **Nuked OPL3** v1.8 emulator (OPL3 mode, 18 voices, 49716 Hz chip resampled to 48 kHz, GENMIDI instruments from the WAD)
+- ALSA sound, 48 kHz stereo S16: the first device that opens of `main_mix2` → `media_mixer` → `default` (if the device does not give exactly 48 kHz, this is written to the log — the pitch will then be slightly different)
+- Music on the **Nuked OPL3** v1.8 emulator (OPL3 mode, 18 voices, 49716 Hz chip → 48 kHz, GENMIDI instruments from the WAD; MUS via mus2mid)
 - **960×720 (4:3)** picture centred on the 1280×720 screen, gamma 2
-- Touch zones only on the black side bars, with labels and icons (left: Menu / Forward / Left / Right / Back; right: Map / Enter / Use / Fire; labels are in Russian)
-- Jog dial, panel and steering-wheel buttons
+- Touch zones only on the black side bars, with labels and icons (left: Menu / Forward / Left / Right / Back; right: Map / Enter / Use / Fire; the labels are in Russian)
+- Control with the jog dial, panel buttons and steering-wheel buttons
 - **Auto-return** after a phone call / rear camera: paused and muted during the interrupt, then Doom comes back to the screen by itself
-- Black startup screen (no white flash)
-- Auto-return logic: UI-manager REQUEST_BG/FG/PRE_FG and REAR_GEAR events (via Genesis-Updater), plus an X11 watchdog: pause+mute 0.4 s after the window is covered; with no known interrupt it re-raises after 3, 6, 12, 24, 48, then ~96 s; any key press re-raises at once
-
-### New in v1.1
-
-- IWAD selection menu when several IWADs sit next to the chosen one (Freedoom 1/2, Doom, Doom II, Final Doom, Chex Quest); last choice remembered in `doom_last_wad.txt`
-- Keys are always given back to the system on any exit (normal, BACK/HOME, signal, crash), on hide and on focus loss (call, camera, system overlay), and re-grabbed on return; input devices opened with `O_CLOEXEC`; held keys reset
-- Logging is off by default; enable with `doom_log_on.txt` next to the WAD/binary (or `DOOM_LOG=1`)
-- Runs from the Genesis-Updater `game\doom-meego\` folder (WAD next to the binary)
+- Black screen at startup (no white flash)
+- **New in v1.1:** game selection menu when several IWADs lie together (Freedoom 1/2, Doom, Doom II, Final Doom, Chex Quest); the last choice is remembered in `doom_last_wad.txt`
+- **New in v1.1:** keys are always given back to the system on any exit (normal quit, BACK/HOME, signal, crash), on hide and on focus loss (call, camera, system window); grabbed again on return. Input devices are opened with `O_CLOEXEC`, held keys are reset
+- **New in v1.1:** logging is off by default; enabled by a `doom_log_on.txt` file next to the WAD/binary (or `DOOM_LOG=1`)
+- **New in v1.1:** runs from the `game\doom-meego\` folder of the Genesis-Updater build (WAD next to the binary)
 
 ### What to download
 
-1. A package from [Releases](https://github.com/SlayerSS/doom-meego/releases):
-   - `doom-meego-v1.1-DH_2015.zip` — **DH, 2015** (`DH.EUR.SOP.10.017`)
-   - `doom-meego-v1.1-DHPE_2018.zip` — **DHPE, 2018** (`DHPE.EUR.SOP.10.017`)
-2. **WAD only**: `freedoom1.wad` (Freedoom Phase 1) from  
+1. **Ready package** from [Releases](https://github.com/SlayerSS/doom-meego/releases) — pick your variant:
+   - `doom-meego-v1.1-DH_2015.zip` — **DH, 2015** cars (`DH.EUR.SOP.10.017`)
+   - `doom-meego-v1.1-DHPE_2018.zip` — **DHPE, 2018** cars (`DHPE.EUR.SOP.10.017`)
+2. **WAD only** (the game data itself): `freedoom1.wad` (Freedoom Phase 1) from  
    https://freedoom.github.io/download.html  
 
-No build step for end users. The Doom binary is the same in both zips; only `.lge.upgrade.xml` differs.
+Nothing else needs to be built. The Doom binary is the same in both zips; only `.lge.upgrade.xml` differs.
 
-The head unit shows an update **only** if `version` matches the unit type.
+The head unit shows the update **only** if `version` in the XML matches the unit type. Wrong zip — no update appears on screen.
 
-### Install
+### Installation (step by step)
 
-1. FAT32 SD card.  
-2. Unzip the matching release.  
-3. Copy **its contents** to the **card root**: `AppUpgrade`, `.lge.upgrade.xml` (do not rename `AppUpgrade`; on Windows enable hidden files for `.lge.upgrade.xml`).  
-4. Put `freedoom1.wad` in the **same root**. Or into the `doom-meego\` folder already included in the zip (empty, with a hint file). Several WADs → game selection menu.  
-5. Insert the card → confirm update (**OK**) → Doom starts.
+1. SD card, **FAT32** format.
+2. Unzip the matching zip.
+3. Copy the **contents** of the zip to the **root** of the card (not into a subfolder):
+   - `AppUpgrade`
+   - `.lge.upgrade.xml`
+   - the `doom-meego\` folder (for WAD files)  
+   **Do not rename** `AppUpgrade`. On Windows `.lge.upgrade.xml` may be hidden — enable showing hidden files.
+4. Download `freedoom1.wad` and put it into the **`doom-meego\`** folder on the card. Other IWADs can go there too — with several, a game selection menu appears at start. (Next to `AppUpgrade` in the root also works.)
+5. Insert the card → confirm the found update (**OK**) → Doom starts.
 
+**Card layout**
 ```
 \
 ├── .lge.upgrade.xml
-├── AppUpgrade
-└── freedoom1.wad
+├── AppUpgrade          ← Doom (from Releases)
+└── doom-meego\         ← WAD folder (from the zip)
+    ├── положите_сюда_WAD.txt
+    └── freedoom1.wad   ← download separately
 ```
 
 ### Troubleshooting
 
-| Symptom | Check |
-|---------|--------|
-| Update not detected | DH vs DHPE; FAT32; files in root; hidden `.lge.upgrade.xml` copied |
-| On-screen WAD message | Place `freedoom1.wad` in the card root next to `AppUpgrade` |
-| No / quiet sound | Use a media source (e.g. Jukebox); radio path is often silent |
+| Symptom | What to check |
+|---------|---------------|
+| Update not detected | DH vs DHPE; FAT32; files in the root; hidden `.lge.upgrade.xml` copied |
+| "Не найден WAD-файл…" (WAD not found) | `freedoom1.wad` in the `doom-meego\` folder on the card (or in the root next to `AppUpgrade`) |
+| No / quiet sound | Active media source (Jukebox); with the radio it is often quiet — head-unit limitation |
 
 ### Controls
 
 | Input | Action |
 |-------|--------|
-| Jog tilt | Move / turn |
-| Jog press | Fire / Enter |
-| Jog long press | Use |
+| Jog: tilt | Move / turn |
+| Jog: press | Fire / Enter |
+| Jog: long press | Use |
 | BACK | Esc / back; long = quit |
-| HOME | Pause / resume (resume brings Doom back to the front) |
+| HOME | Pause / resume (resume brings Doom to the front) |
 | MAP | Automap |
 | MENU / PHONE | Next / previous weapon |
 | NAV | Fire (hold); Enter in menus |
@@ -208,22 +216,44 @@ The head unit shows an update **only** if `version` matches the unit type.
 | Wheel: stick up / down | Next / previous weapon |
 | Wheel: MODE | Automap |
 | Wheel: voice | Pause / resume |
-| Touch, left black bar (top to bottom) | "Меню" = Esc (hold 2 s = quit) / forward / turn left / turn right / back |
-| Touch, right black bar (top to bottom) | Automap / Enter / use / fire |
+| Touch, left black bar (top to bottom) | "Меню" (Menu) = Esc (hold 2 s = quit) / "Вперёд" (Forward) / "Влево" (Left) / "Вправо" (Right) / "Назад" (Back) |
+| Touch, right black bar (top to bottom) | "Карта" (Map) / "Ввод" (Enter) / "Действие" (Use) / "Огонь" (Fire) |
 
-Panel and steering-wheel keys are read directly from the MICOM key device (`/dev/input`), grabbed while Doom is in front, so wheel keys do not reach the phone or other apps. Jog/TUNE rotation comes from the UI manager: turn (up/down in menus), TUNE press = use. Panel BACK held ~1.5 s quits. IWAD menu: jog/arrows = select, press/NAV = play, BACK = quit. On exit, hide or call every key is handed back to the system at once.
+Panel and steering-wheel keys are read directly from the MICOM key device (`/dev/input`); Doom grabs it while it is on screen, so wheel keys do not go to the phone or other apps. Jog/TUNE rotation comes from the UI manager: turn (up/down in menus), TUNE press = use.
 
-WAD lookup: next to `AppUpgrade`, current dir, `doom-meego/` subfolder, `/media/*/doom-meego`, `/mnt/*/doom-meego`, mounted roots; names `freedoom1.wad`, `doom.wad`, `doom1.wad`, `freedoom2.wad`, `doom2.wad`, then any `*.wad`. Optional files next to `AppUpgrade`: `doom_log_on.txt` (empty file, enables the `doom_log.txt` log; off by default), `keys.txt` (key remap; also `/navi/keys.txt`).
+Long BACK: ~1.5 s (panel button) = quit. In the game selection menu: jog/arrows = select, press/NAV = play, BACK = quit. On exit, hide or a call every key is handed back to the system at once. Touch on the game picture itself does nothing.
 
-### Build
+Next to `AppUpgrade` on the card: `doom_log_on.txt` (empty file, enables the `doom_log.txt` log; logging is off by default); optional `keys.txt` (key remap). `keys.txt` is looked up next to `AppUpgrade`, then `/navi/keys.txt`.
+
+WAD lookup (recommended place: the `doom-meego\` folder): next to `AppUpgrade` → current directory → `doom-meego/` subfolder → `/media/*/doom-meego`, `/mnt/*/doom-meego` → roots of mounted media. Names in order: `freedoom1.wad`, `doom.wad`, `doom1.wad`, `freedoom2.wad`, `doom2.wad`, then any `*.wad`.
+
+### Technical details
+
+- Evdev + `EVIOCGRAB` (released on hide / exit / SIGTERM)
+- ALSA via `libasound` (dlopen): 48 kHz, 960-frame period, software sound mixer with linear interpolation and a soft limiter; Nuked OPL3 music (LGPL-2.1+, `src/opl3.c`) mixed into the same stream
+- 960×720 picture (320×200: ×3 horizontally, rows 4,4,3,4,3), centred on 1280×720 with 160 px black bars; touch zones only on the bars, touches on the game are ignored; default gamma 2
+- Pause and PCM close when the screen is lost; window auto-return after an interrupt: UI-manager signals REQUEST_BG / REQUEST_FG / REQUEST_PRE_FG / REAR_GEAR_ENGAGED / REAR_GEAR_REMOVED (via the Updater: "S 0"/"S 1"), plus its own X11 check (window closed/hidden → pause and mute after 0.4 s; with no known interrupt the window is raised again after 3, 6, 12, 24, 48, then ~96 s; any key press raises it at once)
+
+### Build (developers)
 
 ```sh
-sudo ./scripts/build-i686.sh
+sudo ./scripts/build-i686.sh --bootstrap   # once
+sudo ./scripts/build-i686.sh               # DOOM_OK → builds/DH_2015 and builds/DHPE_2018
 ```
 
-Desktop (Qt 5): `qmake doom-meego.pro && make && ./doom-meego -iwad freedoom1.wad`.  
-Binaries are not kept in git (`bin/` is ignored); they are published as release assets. See `CHANGELOG.md`.
+The script puts one binary into both folders and copies the XML from `card/`. Binaries are not kept in git (`bin/` is in `.gitignore`) — they are published as release assets.  
+Desktop test (Qt 5): `qmake doom-meego.pro && make && ./doom-meego -iwad freedoom1.wad`.
+
+XML templates: `card/DH_2015/`, `card/DHPE_2018/`.
+
+### Debugging on the head unit
+
+```sh
+cp /media/<card>/AppUpgrade /tmp/doom && chmod +x /tmp/doom
+cd /media/<card>/doom-meego
+/tmp/doom -iwad freedoom1.wad 2>> doom_log.txt
+```
 
 ### Author
 
-**SlayerSS**, GPL-2.0. See `LICENSE` and `CREDITS.md`.
+**SlayerSS**, Copyright (C) 2026. GPL-2.0 — `LICENSE`. See also `CREDITS.md`.
