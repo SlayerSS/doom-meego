@@ -892,8 +892,8 @@ extern "C" char *meego_find_iwad(void)
         fprintf(stderr, "doom-meego: IWAD %s\n", wad);
         return wad;
     }
-    fprintf(stderr, "doom-meego: %s\n", "Не найден WAD-файл. Скопируйте freedoom1.wad в корень флешки (рядом с AppUpgrade).");
-    meego_show_fatal("Не найден WAD-файл. Скопируйте freedoom1.wad в корень флешки (рядом с AppUpgrade).");
+    fprintf(stderr, "doom-meego: %s\n", "Не найден WAD-файл. Положите freedoom1.wad в папку doom-meego на флешке (или рядом с AppUpgrade).");
+    meego_show_fatal("Не найден WAD-файл. Положите freedoom1.wad в папку doom-meego на флешке (или рядом с AppUpgrade).");
     return 0; /* not reached */
 }
 
