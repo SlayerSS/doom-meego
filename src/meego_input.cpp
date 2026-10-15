@@ -673,7 +673,7 @@ static void openDevices(void)
 static void tryGrabs(int force)
 {
     uint32_t now = DG_GetTicksMs();
-    if (s_hidden || s_focusRel || (!force && now < s_nextGrabTry)) return;
+    if (s_hidden || s_focusRel || !meego_isForeground() || (!force && now < s_nextGrabTry)) return;
     s_nextGrabTry = now + 1000;
     int newly = 0;
     for (int i = 0; i < s_ndev; ++i) {
@@ -767,7 +767,7 @@ static void pollDevices(void)
 }
 
 
-/* ---- paths next to the executable (flat card root: AppUpgrade + freedoom1.wad) ---- */
+/* ---- paths next to the executable (card root: AppUpgrade + WAD/) ---- */
 static char s_exeDir[512];
 static int s_exeDirReady = 0;
 extern "C" const char *meego_exe_dir(void)
@@ -815,7 +815,8 @@ static char *first_wad_in_dir(const char *dir)
     char path[600];
     static const char *prefer[] = {
         "freedoom1.wad", "FREEDOOM1.WAD", "doom.wad", "DOOM.WAD",
-        "doom1.wad", "DOOM1.WAD", "freedoom2.wad", "doom2.wad", 0
+        "doom1.wad", "DOOM1.WAD", "freedoom2.wad", "doom2.wad",
+        "chex.wad", "CHEX.WAD", 0
     };
     for (int i = 0; prefer[i]; ++i) {
         snprintf(path, sizeof(path), "%s/%s", dir, prefer[i]);
@@ -859,41 +860,27 @@ extern "C" void meego_show_fatal(const char *msg_utf8); /* in doomgeneric_meego.
 
 extern "C" char *meego_find_iwad(void)
 {
-    char *wad = first_wad_in_dir(meego_exe_dir());
-    if (!wad) {
-        /* also try cwd (sometimes the unit starts with cwd = card root) */
-        wad = first_wad_in_dir(".");
-    }
+    char *wad = 0;
+    char wadDir[600];
 
-    /* Legacy layout: <card>/doom-meego/freedoom1.wad (updater-era card) */
+    /* 1) Next to the binary (AppUpgrade). 2) WAD/ next to the binary. Then cwd variants. */
+    wad = first_wad_in_dir(meego_exe_dir());
     if (!wad) {
-        char path[600];
-        snprintf(path, sizeof(path), "%s/doom-meego", meego_exe_dir());
-        wad = first_wad_in_dir(path);
-        if (!wad) wad = first_wad_in_dir("./doom-meego");
+        snprintf(wadDir, sizeof(wadDir), "%s/WAD", meego_exe_dir());
+        wad = first_wad_in_dir(wadDir);
     }
-    if (!wad) {
-        static const char *roots[] = { "/media", "/mnt", 0 };
-        for (int r = 0; roots[r] && !wad; ++r) {
-            DIR *d = opendir(roots[r]);
-            if (!d) continue;
-            struct dirent *e;
-            while ((e = readdir(d)) != 0 && !wad) {
-                if (e->d_name[0] == '.') continue;
-                char sub[600];
-                snprintf(sub, sizeof(sub), "%s/%s/doom-meego", roots[r], e->d_name);
-                wad = first_wad_in_dir(sub);
-            }
-            closedir(d);
-        }
-    }
+    if (!wad) wad = first_wad_in_dir(".");
+    if (!wad) wad = first_wad_in_dir("./WAD");
+    /* Last resort: any *.wad on a mounted volume root (loose cards). */
     if (!wad) scan_mount_roots(&wad);
+
     if (wad) {
         fprintf(stderr, "doom-meego: IWAD %s\n", wad);
         return wad;
     }
-    fprintf(stderr, "doom-meego: %s\n", "Не найден WAD-файл. Положите freedoom1.wad в папку doom-meego на флешке (или рядом с AppUpgrade).");
-    meego_show_fatal("Не найден WAD-файл. Положите freedoom1.wad в папку doom-meego на флешке (или рядом с AppUpgrade).");
+    const char *msg = "Не найден WAD-файл. Положите freedoom1.wad в папку WAD рядом с AppUpgrade (или рядом с самой программой).";
+    fprintf(stderr, "doom-meego: %s\n", msg);
+    meego_show_fatal(msg);
     return 0; /* not reached */
 }
 
@@ -964,9 +951,42 @@ static void requestRaiseNow(const char *why)
 
 /* Lost the screen without being told (no S 0): pause + mute, then try to come back.
  * Known interrupts (S 0 hidden / I 1) are never fought; "S 1" / "I 0" raise at once. */
+/* Watchdog: if we are not the foreground window for >1 s, release EVIOCGRAB
+ * immediately (rear camera / HU menu often skip reliable FocusOut). Re-grab
+ * only once meego_isForeground() is true again. Cap auto-raise backoff at 8 s
+ * so recovery after camera is not a ~1 minute wait. */
 static void focusWatch(uint32_t now)
 {
-    if (s_hidden) { s_hardLost = 0; return; }
+    static uint32_t s_notFgSince = 0;
+
+    if (s_hidden) { s_hardLost = 0; s_notFgSince = 0; return; }
+
+    int fg = meego_isForeground();
+    if (!fg) {
+        if (!s_notFgSince) s_notFgSince = now;
+        if (now - s_notFgSince >= 1000) {
+            if (!s_focusRel) {
+                s_focusRel = 1;
+                fprintf(stderr, "doom-meego: [grab] not foreground >1s -> release keys t=%u\n", rel());
+                meego_resetKeys("not foreground");
+                releaseGrabs();
+            }
+            if (!s_hardLost) {
+                s_hardLost = 1;
+                s_hardLostAt = s_notFgSince;
+                fprintf(stderr, "doom-meego: [ui] lost front (watchdog)\n");
+            }
+        }
+    } else {
+        s_notFgSince = 0;
+        if (s_focusRel) {
+            s_focusRel = 0;
+            fprintf(stderr, "doom-meego: [grab] foreground again -> grab t=%u\n", rel());
+            s_nextGrabTry = 0;
+            tryGrabs(1);
+        }
+    }
+
     if (s_hardLost) {
         if (!s_focusPaused && now - s_hardLostAt >= 400) {
             meego_resetKeys("window lost");
@@ -975,11 +995,16 @@ static void focusWatch(uint32_t now)
             I_AlsaFocusPause(1, "window lost (auto)");
             fprintf(stderr, "doom-meego: [ui] paused+muted: window lost t=%u\n", rel());
         }
-        if (s_onHU && !s_intr && now - s_hardLostAt >= s_raiseBackoff && now >= s_nextRaise) {
+        /* Only fight for the screen while we still look background; once fg, clear below. */
+        if (!fg && s_onHU && !s_intr && now - s_hardLostAt >= s_raiseBackoff && now >= s_nextRaise) {
             fprintf(stderr, "doom-meego: [ui] want front (auto re-raise, backoff %u ms) t=%u\n", s_raiseBackoff, rel());
             meego_setVisible(1);
             s_nextRaise = now + s_raiseBackoff;
-            if (s_raiseBackoff < 60000) s_raiseBackoff *= 2;
+            if (s_raiseBackoff < 8000) s_raiseBackoff = s_raiseBackoff < 4000 ? 4000 : 8000;
+        }
+        if (fg) {
+            if (s_hardLost) fprintf(stderr, "doom-meego: [ui] front again (watchdog)\n");
+            s_hardLost = 0;
         }
     } else if (s_focusPaused) {
         if (s_focusPaused == 1 && paused) sendpause = 1;

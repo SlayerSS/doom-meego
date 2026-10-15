@@ -1,0 +1,15 @@
+Положите сюда WAD-файлы (freedoom1.wad, doom.wad, doom2.wad, chex.wad, …).
+Игра также ищет WAD рядом с AppUpgrade (на уровень выше этой папки).
+Если файлов больше одного — при запуске появится меню выбора.
+
+Freedoom Phase 1 (бесплатно):
+https://github.com/freedoom/freedoom/releases
+
+---
+
+Put WAD files here (freedoom1.wad, doom.wad, doom2.wad, chex.wad, …).
+The game also looks for WADs next to AppUpgrade (one level above this folder).
+If more than one file is present, a selection menu appears at start.
+
+Freedoom Phase 1 (free):
+https://github.com/freedoom/freedoom/releases

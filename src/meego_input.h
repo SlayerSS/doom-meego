@@ -19,6 +19,7 @@ void meego_quit(void);              /* release grabs and exit(0) */
 void meego_setVisible(int on);      /* hide/show (call, camera, or stdin S) */
 void meego_diag(const char *why);   /* [diag] dump of all /dev/input/event* + X focus */
 void meego_focusEvent(const char *what, int lost);  /* Qt/X focus change */
+int  meego_isForeground(void);     /* 1 if Doom window is visible+active */
 void meego_resetKeys(const char *why);
 void meego_x11_report(const char *why);
 const char *meego_exe_dir(void);   /* directory of /proc/self/exe */

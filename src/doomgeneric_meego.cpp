@@ -132,7 +132,7 @@ static const char *kZoneName[Z_COUNT] = {   // UTF-8, shown under the icon in th
 #define GAME_W 960   // 320 x3
 #define GAME_H 720   // 200 x3.6 (rows repeated 4,4,3,4,3 -> exactly 18 rows per 5 source rows)
 
-// ---------------- IWAD selection menu (before D_DoomMain, only if >1 IWAD next to the chosen one) ----------------
+// ---------------- WAD selection menu (before D_DoomMain, only if >1 WAD next to binary or in WAD/) ----------------
 #define WM_MAX 8
 struct WadMenu { int active; int count; int sel; int chosen; char path[WM_MAX][600]; const char *title[WM_MAX]; const char *file[WM_MAX]; };
 static WadMenu s_wm;
@@ -600,6 +600,16 @@ extern "C" void meego_setVisible(int on)
     }
 }
 
+/* True only when our window is mapped, not minimized, and is the active window.
+ * Used by the input watchdog so rear-camera / HU-menu overlays release EVIOCGRAB
+ * even when X11 FocusOut/VisibilityNotify is flaky. */
+extern "C" int meego_isForeground(void)
+{
+    if (!s_Widget) return 0;
+    if (!s_Widget->isVisible() || s_Widget->isMinimized()) return 0;
+    return s_Widget->isActiveWindow() ? 1 : 0;
+}
+
 
 extern "C" void meego_show_fatal(const char *msg_utf8)
 {
@@ -644,21 +654,32 @@ static const WadKnown kWads[] = {
     { 0, 0 }
 };
 
-static int isIwadFile(const char *path)
+/* Accept IWAD or PWAD. Chex Quest ships as PWAD but is a known IWAD by name
+ * (doomgeneric d_iwad.c: chex.wad -> pack_chex); rejecting PWAD hid CHEX.WAD from the menu. */
+static int isWadFile(const char *path)
 {
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
     char hdr[4] = { 0, 0, 0, 0 };
     size_t n = fread(hdr, 1, 4, f);
     fclose(f);
-    return n == 4 && memcmp(hdr, "IWAD", 4) == 0;
+    if (n != 4) return 0;
+    return memcmp(hdr, "IWAD", 4) == 0 || memcmp(hdr, "PWAD", 4) == 0;
 }
 
-/* Collect supported IWADs in dir (table order). */
-static void wadMenuScan(const char *dir)
+static int wadMenuHasFile(const char *file)
 {
-    s_wm.count = 0;
+    for (int i = 0; i < s_wm.count; ++i)
+        if (strcasecmp(s_wm.file[i], file) == 0) return 1;
+    return 0;
+}
+
+/* Append supported WADs from dir (table order). Skips duplicates by logical name. */
+static void wadMenuScanDir(const char *dir)
+{
+    if (!dir || !dir[0]) return;
     for (int k = 0; kWads[k].file && s_wm.count < WM_MAX; ++k) {
+        if (wadMenuHasFile(kWads[k].file)) continue;
         DIR *d = opendir(dir);
         if (!d) return;
         struct dirent *e;
@@ -666,7 +687,10 @@ static void wadMenuScan(const char *dir)
             if (strcasecmp(e->d_name, kWads[k].file) != 0) continue;
             char path[600];
             snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
-            if (!isIwadFile(path)) { fprintf(stderr, "doom-meego: [wadmenu] skip %s (no IWAD header)\n", path); continue; }
+            if (!isWadFile(path)) {
+                fprintf(stderr, "doom-meego: [wadmenu] skip %s (not IWAD/PWAD)\n", path);
+                continue;
+            }
             int i = s_wm.count++;
             snprintf(s_wm.path[i], sizeof(s_wm.path[i]), "%s", path);
             s_wm.title[i] = kWads[k].title;
@@ -677,6 +701,19 @@ static void wadMenuScan(const char *dir)
     }
 }
 
+/* Next to the binary and in the WAD/ subfolder (same places meego_find_iwad searches). */
+static void wadMenuCollectAll(void)
+{
+    char wadDir[600];
+    s_wm.count = 0;
+    snprintf(wadDir, sizeof(wadDir), "%s/WAD", meego_exe_dir());
+    wadMenuScanDir(meego_exe_dir());
+    wadMenuScanDir(wadDir);
+    wadMenuScanDir(".");
+    wadMenuScanDir("./WAD");
+    fprintf(stderr, "doom-meego: [wadmenu] %d WAD(s) (exe + WAD/)\n", s_wm.count);
+}
+
 static void wadMenuRun(void)
 {
     int idx = -1;
@@ -685,16 +722,12 @@ static void wadMenuRun(void)
         if (strcmp(myargv[i], "-iwad") == 0) idx = i + 1;
     }
     if (idx < 0 || getenv("DOOM_NOWADMENU")) return;
-    char dir[600];
-    snprintf(dir, sizeof(dir), "%s", myargv[idx]);
-    char *slash = strrchr(dir, '/');
-    if (slash) *slash = 0; else snprintf(dir, sizeof(dir), ".");
-    wadMenuScan(dir);
-    fprintf(stderr, "doom-meego: [wadmenu] %d IWAD(s) in %s\n", s_wm.count, dir);
+    wadMenuCollectAll();
     if (s_wm.count < 2) return;
 
+    /* Remember last choice next to the binary (writable on the card). */
     char lastFile[600];
-    snprintf(lastFile, sizeof(lastFile), "%s/doom_last_wad.txt", dir);
+    snprintf(lastFile, sizeof(lastFile), "%s/doom_last_wad.txt", meego_exe_dir());
     char last[128] = "";
     FILE *lf = fopen(lastFile, "r");
     if (lf) { if (fgets(last, sizeof(last), lf)) { char *nl = strpbrk(last, "\r\n"); if (nl) *nl = 0; } fclose(lf); }
@@ -843,11 +876,11 @@ int main(int argc, char **argv)
     setvbuf(stdout, 0, _IOLBF, 0);
     {
         /* Logging is OFF by default (14.10). Enable: env DOOM_LOG=1 or a file doom_log_on.txt
-           next to the WAD / exe (card: doom-meego/doom_log_on.txt). Off -> stdout+stderr to /dev/null. */
+           next to the binary (card: doom_log_on.txt). Off -> stdout+stderr to /dev/null. */
         int on = getenv("DOOM_LOG") && atoi(getenv("DOOM_LOG")) > 0;
         char p[700];
-        const char *dirs[4] = { meego_exe_dir(), "/navi/doom-meego", "./doom-meego", "." };
-        for (int i = 0; !on && i < 4; ++i) {
+        const char *dirs[3] = { meego_exe_dir(), ".", "./WAD" };
+        for (int i = 0; !on && i < 3; ++i) {
             snprintf(p, sizeof(p), "%s/doom_log_on.txt", dirs[i]);
             on = access(p, F_OK) == 0;
         }
